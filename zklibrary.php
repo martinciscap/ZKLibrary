@@ -1,4 +1,6 @@
 <?php
+//This version of ZKLibrary is compatible with PHP 8
+
 error_reporting(0);
 
 define('CMD_CONNECT', 1000);
@@ -137,7 +139,7 @@ class ZKLibrary
         }
     }
 
-    public function setTimeout($sec = 0, $usec = 0)
+    /*public function setTimeout($sec = 0, $usec = 0)
     {
         if ($sec != 0) {
             $this->timeout_sec = $sec;
@@ -147,7 +149,26 @@ class ZKLibrary
         }
         $timeout = array('sec' => $this->timeout_sec, 'usec' => $this->timeout_usec);
         socket_set_option($this->socket, SOL_SOCKET, SO_RCVTIMEO, $timeout);
+    }*/
+
+    public function setTimeout($sec = 0, $usec = 0)
+    {
+        $this->timeout_sec = $sec;
+        $this->timeout_usec = $usec;
+        
+        // Normalizar microsegundos
+        if ($this->timeout_usec >= 1000000) {
+            $additional_secs = floor($this->timeout_usec / 1000000);
+            $this->timeout_sec += $additional_secs;
+            $this->timeout_usec -= $additional_secs * 1000000;
+        }
+
+        $timeout = array('sec' => $this->timeout_sec, 'usec' => $this->timeout_usec);
+        if (!socket_set_option($this->socket, SOL_SOCKET, SO_RCVTIMEO, $timeout)) {
+            echo "Failed to set socket timeout: " . socket_strerror(socket_last_error($this->socket));
+        }
     }
+
 
     public function ping($timeout = 1)
     {
@@ -171,7 +192,7 @@ class ZKLibrary
         return $output;
     }
 
-    private function encodeTime($time)
+    /*private function encodeTime($time)
     {
         $str = str_replace(array(":", " "), array("-", "-"), $time);
         $arr = explode("-", $str);
@@ -183,9 +204,26 @@ class ZKLibrary
         $second = ltrim(@$arr[5], '0') * 1;
         $data = (($year % 100) * 12 * 31 + (($month - 1) * 31) + $day - 1) * (24 * 60 * 60) + ($hour * 60 + $minute) * 60 + $second;
         return $data;
+    }*/
+
+    private function encodeTime($time)
+    {
+        $str = str_replace(array(":", " "), array("-", "-"), $time);
+        $arr = explode("-", $str);
+
+        $year = isset($arr[0]) ? $arr[0] * 1 : 0; // Proporciona un valor por defecto si no existe
+        $month = isset($arr[1]) ? ltrim($arr[1], '0') * 1 : 0; // Proporciona un valor por defecto si no existe
+        $day = isset($arr[2]) ? ltrim($arr[2], '0') * 1 : 0; // Proporciona un valor por defecto si no existe
+        $hour = isset($arr[3]) ? ltrim($arr[3], '0') * 1 : 0; // Proporciona un valor por defecto si no existe
+        $minute = isset($arr[4]) ? ltrim($arr[4], '0') * 1 : 0; // Proporciona un valor por defecto si no existe
+        $second = isset($arr[5]) ? ltrim($arr[5], '0') * 1 : 0; // Proporciona un valor por defecto si no existe
+
+        $data = (($year % 100) * 12 * 31 + (($month - 1) * 31) + $day - 1) * (24 * 60 * 60) + ($hour * 60 + $minute) * 60 + $second;
+        return $data;
     }
 
-    private function decodeTime($data)
+
+    /*private function decodeTime($data)
     {
         $second = $data % 60;
         $data = $data / 60;
@@ -200,7 +238,27 @@ class ZKLibrary
         $year = floor($data + 2000);
         $d = date("Y-m-d H:i:s", strtotime($year . '-' . $month . '-' . $day . ' ' . $hour . ':' . $minute . ':' . $second));
         return $d;
+    }*/
+
+    private function decodeTime($data)
+    {
+        $second = intval($data % 60);
+        $data = $data / 60;
+        $minute = intval($data % 60);
+        $data = $data / 60;
+        $hour = intval($data % 24);
+        $data = $data / 24;
+        $day = intval($data % 31) + 1;
+        $data = $data / 31;
+        $month = intval($data % 12) + 1;
+        $data = $data / 12;
+        $year = intval(floor($data + 2000));
+        
+        // Construir la fecha en formato Y-m-d H:i:s asegurándose de que los valores son válidos
+        $dateStr = sprintf("%04d-%02d-%02d %02d:%02d:%02d", $year, $month, $day, $hour, $minute, $second);
+        return $dateStr;
     }
+
 
     private function checkSum($p)
     {
@@ -236,7 +294,7 @@ class ZKLibrary
         return pack('S', $chksum);
     }
 
-    public function createHeader($command, $chksum, $session_id, $reply_id, $command_string)
+    /*public function createHeader($command, $chksum, $session_id, $reply_id, $command_string)
     {
         $buf = pack('SSSS', $command, $chksum, $session_id, $reply_id) . $command_string;
         $buf = unpack('C' . (8 + strlen($command_string)) . 'c', $buf);
@@ -254,7 +312,23 @@ class ZKLibrary
         }
         $buf = pack('SSSS', $command, $chksum, $session_id, $reply_id);
         return $buf . $command_string;
+    }*/
+
+    public function createHeader($command, $chksum, $session_id, $reply_id, $command_string)
+    {
+        $buf = pack('SSSS', $command, $chksum, $session_id, $reply_id) . $command_string;
+        $buf = unpack('C' . (8 + strlen($command_string)) . 'c', $buf);
+        $u = unpack('S', $this->checkSum($buf));
+        // La forma más simple de obtener el primer elemento del array en PHP si estamos seguros que siempre tendrá al menos un elemento.
+        $chksum = reset($u); // Esto reemplaza la necesidad del bucle y el uso de `each()`
+        $reply_id += 1;
+        if ($reply_id >= USHRT_MAX) {
+            $reply_id -= USHRT_MAX;
+        }
+        $buf = pack('SSSS', $command, $chksum, $session_id, $reply_id);
+        return $buf . $command_string;
     }
+
 
     private function checkValid($reply)
     {
